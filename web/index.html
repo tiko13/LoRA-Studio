@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LoRA Studio</title><link rel="stylesheet" href="/styles.css"></head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="brand-icon">L</span><span>LoRA Studio<small>CREATE SOMETHING YOURS</small></span></a>
+    <button id="new-project" class="primary wide">＋ New LoRA</button>
+    <div class="section-label">YOUR PROJECTS</div><nav id="projects" aria-label="Projects"></nav>
+    <div class="sidebar-bottom"><button id="connections" class="wide">⚙ Connections</button><p>Local workspace <span class="dot"></span><br><small>Your images and projects stay on this PC.</small></p></div>
+  </aside>
+  <div class="workspace">
+    <header><div><span class="eyebrow">WORKSPACE</span><h1 id="project-title">Your next LoRA starts here</h1></div><span id="save-state" role="status">Ready</span></header>
+    <nav class="tabs" aria-label="Project steps"><button data-tab="setup" class="active">01 <span>Setup</span></button><button data-tab="dataset">02 <span>Dataset</span></button><button data-tab="training">03 <span>Training</span></button><button data-tab="runs">04 <span>Runs</span></button></nav>
+    <div class="workspace-body"><main id="content"></main><aside id="inspector"></aside></div>
+    <footer><span id="connection-label">Checking local connections…</span><span>LoRA Studio · v0.1</span></footer>
+  </div>
+  <dialog id="modal"><div id="modal-content"></div></dialog>
+  <div id="toast" role="status" hidden></div>
+  <script type="module" src="/app.js"></script>
+</body></html>

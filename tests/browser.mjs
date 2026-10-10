@@ -1,0 +1,86 @@
+// Set PLAYWRIGHT_MODULE to an installed playwright/index.mjs; no runtime npm dependencies.
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdir} from 'node:fs/promises';
+import {pathToFileURL} from 'node:url';
+import path from 'node:path';
+const {chromium}=await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
+const out=path.resolve('test-results/browser-'+Date.now());await mkdir(out,{recursive:true});
+const server=spawn(process.env.PYTHON||'python',['server.py','--port','0','--data',path.join(out,'data')],{windowsHide:true});
+let browser;
+try {
+  const url=await new Promise((resolve,reject)=>{server.stdout.on('data',chunk=>{const match=String(chunk).match(/http:\/\/127\.0\.0\.1:\d+/);if(match)resolve(match[0]);});server.once('error',reject);server.once('exit',code=>reject(new Error('Server exited '+code)));});
+  browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE});
+  const page=await browser.newPage({viewport:{width:1512,height:1100}}),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(url);
+  await page.getByRole('button',{name:'Create your first LoRA'}).click();
+  await page.getByLabel('LoRA name',{exact:true}).fill('Ceramic collection');
+  await page.getByLabel('Trigger words').fill('crmc_object');
+  await page.locator('[data-kind="object"]').click();
+  await page.getByLabel('Describe the learning target').fill('The red shape on the left.');
+  await page.getByRole('group',{name:'Colour',exact:true}).getByLabel('Make changeable').check();
+  await page.locator('[data-kind="character"]').click();
+  await page.getByRole('group',{name:'Hair colour',exact:true}).getByLabel('Make changeable').check();
+  await page.locator('[data-kind="object"]').click();
+  assert(await page.getByRole('group',{name:'Colour',exact:true}).getByLabel('Make changeable').isChecked());
+  await page.getByText('All changes saved',{exact:true}).waitFor();
+  await page.screenshot({path:path.join(out,'setup-desktop.png'),fullPage:true});
+  await page.reload();
+  await page.getByRole('heading',{name:'Ceramic collection',exact:true}).first().waitFor();
+  assert.equal(await page.getByLabel('Trigger words').inputValue(),'crmc_object');
+  await page.getByRole('button',{name:'Connections',exact:false}).click();
+  await page.getByLabel('AI Toolkit folder',{exact:true}).fill(process.env.TOOLKIT_PATH||'');
+  await page.getByLabel('AI Toolkit Python executable').fill(process.env.TOOLKIT_PYTHON||'');
+  await page.getByRole('button',{name:'Save & check connections'}).click();
+  await page.getByText('Connections saved.',{exact:true}).waitFor({timeout:45000});
+  await page.getByRole('button',{name:'Close dialog'}).click();
+  await page.getByRole('button',{name:'Continue to dataset'}).click();
+  await page.locator('#image-input').setInputFiles('test-results/live-vision/sample.png');
+  await page.getByText('1 images · 0 ready').waitFor();
+  if(process.env.LIVE_VISION==='1') {
+    await page.getByRole('button',{name:'Prepare captions'}).click();
+    await page.getByText('complete',{exact:true}).waitFor({timeout:120000});
+    await page.getByRole('button',{name:'02 Dataset'}).click();
+    await page.locator('[data-image]').click();
+    assert((await page.locator('textarea[name="caption"]').inputValue()).includes('crmc_object'));
+    await page.screenshot({path:path.join(out,'caption-review.png'),fullPage:true});
+    await page.getByLabel('I reviewed this caption').check();
+    await page.getByRole('button',{name:'Save caption',exact:true}).click();
+  } else {
+    await page.locator('[data-image]').click();
+    await page.locator('textarea[name="caption"]').fill('crmc_object on a beige background next to a blue circle.');
+    await page.getByLabel('I reviewed this caption').check();
+    await page.getByRole('button',{name:'Save caption',exact:true}).click();
+  }
+  await page.getByText('1 images · 1 ready').waitFor();
+  await page.getByRole('button',{name:'01 Setup'}).click();
+  await page.getByRole('group',{name:'Material',exact:true}).getByLabel('Make changeable').check();
+  await page.getByRole('button',{name:'02 Dataset'}).click();
+  await page.getByText('Rules changed',{exact:true}).waitFor();
+  await page.locator('[data-image]').click();
+  await page.locator('textarea[name="caption"]').fill('crmc_object, a red rectangular shape beside a blue circle on beige.');
+  await page.getByLabel('I reviewed this caption').check();
+  await page.getByRole('button',{name:'Save caption',exact:true}).click();
+  await page.getByText('Manual · ready',{exact:true}).waitFor();
+  await page.screenshot({path:path.join(out,'dataset-desktop.png'),fullPage:true});
+  await page.getByRole('button',{name:'Review training'}).click();
+  await page.getByRole('button',{name:'Export training bundle'}).click();
+  await page.getByRole('heading',{name:'Training bundle',exact:true}).waitFor();
+  await page.waitForFunction(()=>[...document.querySelectorAll('.run')].some(e=>e.textContent.includes('Training bundle')&&e.textContent.includes('complete')));
+  await page.locator('.run').filter({has:page.getByRole('heading',{name:'Training bundle',exact:true})}).getByRole('button',{name:'View details & files'}).click();
+  await page.getByRole('link',{name:/training-bundle.zip/}).waitFor();
+  await page.getByRole('button',{name:'Close dialog'}).click();
+  await page.getByRole('button',{name:'01 Setup'}).click();
+  await page.getByRole('heading',{name:'What are we teaching?',exact:true}).waitFor();
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:path.join(out,'setup-mobile.png'),fullPage:true});
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'Mobile horizontal overflow');
+  // Draft recovery survives a browser reload, without silently overwriting the server copy.
+  await page.evaluate(()=>{const id=localStorage.getItem('lora-studio.active');return fetch('/api/projects/'+id).then(r=>r.json()).then(({project})=>localStorage.setItem('lora-studio.draft.'+id,JSON.stringify({...project,name:'Recovered local draft'})));});
+  await page.reload();await page.getByRole('button',{name:'Restore draft',exact:true}).click();
+  assert.equal(await page.getByLabel('LoRA name',{exact:true}).inputValue(),'Recovered local draft');
+  await page.getByText('All changes saved',{exact:true}).waitFor();
+  assert.deepEqual(errors,[]);
+  console.log(JSON.stringify({result:'passed',liveVision:process.env.LIVE_VISION==='1',screenshots:out,browserErrors:errors},null,2));
+}finally{await browser?.close();server.kill();}

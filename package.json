@@ -1,0 +1,8 @@
+{
+  "name": "lora-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "scripts": { "test": "node --test tests/domain.test.mjs", "test:backend": "python -m unittest discover -v", "test:browser": "node tests/browser.mjs", "start": "python server.py" }
+}
