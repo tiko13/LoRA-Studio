@@ -17,7 +17,7 @@ Select what you want to teach, import your images, and click **Create LoRA**. Lo
 ## Quick start
 
 1. Download or clone this repository into its own folder and install **Python 3.10 or newer**, available as `python` in your terminal.
-2. Double-click **`launch.bat`** on Windows. It creates a local Python environment, installs the app's dependencies and opens [LoRA Studio](http://127.0.0.1:8787) in your browser. No npm build is required.
+2. Double-click **`start.bat`** on Windows. It creates a local Python environment, installs the app's dependencies and opens [LoRA Studio](http://127.0.0.1:8787) in your browser. No npm build is required.
 3. Follow the setup wizard: connect an existing **AI Toolkit** installation or choose **Download & install**, then choose **Prompt Studio** or a **standalone local LLM** for captioning.
 4. In **Base info**, choose your LoRA type and base model, give it a name, and describe the target if needed.
 5. In **Dataset**, import PNG, JPEG or WebP images. Exact duplicates are skipped; open any image to review its caption and training crop.
@@ -40,7 +40,7 @@ python -m venv .venv
 .venv\Scripts\python server.py --open
 ```
 
-Use `launch.bat --port 8788` for another port, or `launch.bat --help` for available options. `start.bat` is also supported. AI Toolkit and your captioning backend use their own environments and dependencies.
+Use `start.bat --port 8788` for another port, or `start.bat --help` for available options. AI Toolkit and your captioning backend use their own environments and dependencies.
 
 </details>
 

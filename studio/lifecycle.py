@@ -32,7 +32,7 @@ class Lifecycle:
         service = self.service
         with self.lock:
             if not self.enabled:
-                raise Conflict('Restart is unavailable in this server. Start LoRA Studio with launch.bat or python server.py.')
+                raise Conflict('Restart is unavailable in this server. Start LoRA Studio with start.bat or python server.py.')
             if self.writes > 1:
                 raise Conflict('Wait for other changes to finish saving, then restart.')
             if not service.job_lock.acquire(blocking=False):
