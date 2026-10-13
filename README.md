@@ -1,58 +1,141 @@
-# LoRA Studio
+# One click (almost) LoRA training
 
-A local workspace for intent-aware dataset captioning and AI Toolkit training. The interface follows Prompt Studio's visual language. Prompt Studio integration is optional; it uses the existing HTTP API and requires no changes to ComfyUI or Prompt Studio.
+Select what you want to teach, import your images, and click **Create LoRA**. LoRA Studio prepares everything and starts training with AI Toolkit, with optional controls when you want to go deeper.
 
-## Start
+- **Go from images to training in one workspace.** Follow Base info → Dataset → Create, with automatic preparation and editable defaults.
+- **Teach what matters.** Choose what should stay consistent and what should remain changeable, with captioning tailored to people, objects, styles and concepts.
+- **Keep control of your captions.** Review the image, caption and supporting observations together. Manual edits and earlier versions stay recoverable.
+- **Watch your LoRA take shape.** Follow live training progress and previews, save checkpoints, pause and resume, or continue a completed run.
+- **Compare before you choose.** Test checkpoints with matching prompts and seeds in a saved image grid through the optional Prompt Studio connection.
+- **Take your LoRA with you.** Download weights with embedded trigger phrases, public metadata and selected training settings.
+- **Pick up where you left off.** Saved projects, recoverable drafts, frozen runs and reusable presets keep your work organised.
 
-Run `start.bat`, or `python server.py --open` with Python 3.10 or newer. Open **http://127.0.0.1:8787**. The application itself uses the Python standard library and browser APIs; no npm build or pip install is required. AI Toolkit and the vision server keep their own environments and dependencies.
+**Runs locally. ComfyUI is optional.** Use a standalone **Llama.cpp**, **Ollama** or **KoboldCpp** backend, or reuse your [Prompt Studio](https://github.com/tiko13/ComfyUI_PromptStudio) connection. [AI Toolkit](https://github.com/ostris/ai-toolkit) handles training in its own environment.
 
-In **Connections**, select your AI Toolkit folder (containing `run.py`) and its Python executable. Machine-specific paths are stored in the ignored `data/` directory. Keep this local app bound to loopback; it is not designed for remote hosting.
+[Get started](#quick-start) · [The workflow](#from-images-to-a-lora) · [Captions and preparation](#prepare-images-with-purpose) · [Training and results](#watch-train-and-compare) · [Setup and models](#setup-and-models) · [User guide](docs/user-guide.md)
 
-## First workflow
+## Quick start
 
-1. Create a LoRA, choose a type and base model, and describe the target and trigger.
-2. Choose **Auto**, **Keep consistent**, or **Make changeable** for each attribute. Auto's resolved choice is shown. Extra free-text rules are optional. Type changes preserve hidden choices.
-3. Import PNG, JPEG, or WebP images (WebP is converted to PNG in the browser). Exact duplicates are skipped. Exclude unsuitable images from their review dialog.
-4. Select **Prepare captions**. The local vision model returns visual observations, an intent-aware caption, and uncertainty warnings. Review flagged images; edits remain manual and are never overwritten by automatic captioning. Changing learning rules makes older captions stale.
-5. Open **Training**. Use the starter settings or adjust steps, rank, resolution, learning rate, GPU, seed and preview prompts. Export a portable bundle or launch the installed AI Toolkit. The first run may download base model components; model access and Hugging Face authentication belong to AI Toolkit's environment.
-6. Use **Runs** for logs, configuration, manifest, preview images, bundles and saved `.safetensors` files. Stop terminates the trainer and its child processes; work after the last checkpoint can be lost.
+1. Download or clone this repository into its own folder and install **Python 3.10 or newer**, available as `python` in your terminal.
+2. Double-click **`launch.bat`** on Windows. It creates a local Python environment, installs the app's dependencies and opens [LoRA Studio](http://127.0.0.1:8787) in your browser. No npm build is required.
+3. Follow the setup wizard: connect an existing **AI Toolkit** installation or choose **Download & install**, then choose **Prompt Studio** or a **standalone local LLM** for captioning.
+4. In **Base info**, choose your LoRA type and base model, give it a name, and describe the target if needed.
+5. In **Dataset**, import PNG, JPEG or WebP images. Exact duplicates are skipped; open any image to review its caption and training crop.
+6. In **Create**, click **Create LoRA**. Automatic mode prepares missing or outdated automatic captions, creates preview prompts and starts training after prerequisite checks pass.
 
-The current model catalog includes **Krea 2 Raw**, **Qwen Image 2.1**, **FLUX.1 Dev**, and **SDXL**. Installed architecture discovery gates training. This is an extensible adapter, not a claim that every architecture or hardware configuration has been trained and validated.
+The “almost” is setup and a suitable dataset. You still choose the images and model, and resolve any blocking preparation issues. Caption suggestions are editable; automatic preparation is not a guarantee of caption accuracy or trained quality.
 
-## Optional Prompt Studio connection
+Keep the launcher console open while using Studio; press **Ctrl+C** to stop the server. You can reopen setup from **Settings → Run setup**, or choose **Set up later** while you organise a project.
 
-- **Automatic** uses the active Prompt Studio chat's saved LLM connection when available, with a standalone local OpenAI-compatible endpoint as fallback when Prompt Studio is unreachable.
-- **Prompt Studio only** requires that integration; **Standalone** does not contact ComfyUI.
-- A connected but non-vision model is an error, not a silent provider switch. Select the intended vision model in Prompt Studio first. The settings are captured at the beginning of each caption job.
-- Caption requests use Prompt Studio's existing provider and scheduling code. They do not add messages to your chat. Uploaded reference images are retained in Prompt Studio's own image storage.
-- With model unloading enabled, Studio checks ComfyUI's queue and Prompt Studio jobs, then requests `/free` before training. ComfyUI stays running. This is a cooperative handoff, not a global reservation: avoid starting new generations during training. The external vision LLM is not forcibly unloaded.
+<details>
+<summary>Terminal launch and manual installation</summary>
 
-Only localhost HTTP endpoints are accepted. Standalone endpoints use the OpenAI-compatible `/models` and `/chat/completions` contracts and must support image input. No API keys are required or stored by this version.
+From the repository folder on Windows:
 
-## Persistence and reproducibility
+```powershell
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python server.py --open
+```
 
-`data/studio.sqlite3` stores projects, caption history, settings and jobs. Imported images live in `data/images/`. Each run copies included images and captions into `data/runs/<id>/`, alongside its configuration and manifest. Later edits do not affect that snapshot. Export bundles use relative dataset/output paths.
+Use `launch.bat --port 8788` for another port, or `launch.bat --help` for available options. `start.bat` is also supported. AI Toolkit and your captioning backend use their own environments and dependencies.
 
-Project writes use revision checks. Browser drafts survive reloads and require an explicit restore/discard choice. Manual caption changes require review against the current rules. Jobs interrupted by a server restart are marked interrupted; training remains blocked until the recorded process is confirmed stopped from the run details. A missing process ID requires manual investigation. Keep the server open during training.
+</details>
 
-Back up the entire `data/` directory with the application stopped, including SQLite sidecar files if present. Datasets, local settings, outputs and test artifacts are excluded from Git.
+## From images to a LoRA
 
-## Scope of this first version
+### Define what you want to teach
 
-Caption preparation, import, editable starter settings, immutable export, trainer launch, stop, logs and output downloads are implemented. Captions describe visible evidence without inventing hidden details or sanitizing relevant factual terminology. Keep/change choices guide language; they do not edit images or guarantee disentanglement. Review model output for factual accuracy.
+Start with a name, model and target type. Studio supplies an editable trigger and category-specific defaults. Optional **Keep / Change** rules let you explain which traits belong to the LoRA and which should remain flexible.
 
-Automatic dataset generation, semantic dataset curation, quality scoring, checkpoint comparisons, resume controls, additional trainer adapters and automatic hyperparameter tuning are future work. With no source dataset, begin by collecting suitable images. Starter defaults are not hardware sizing or quality guarantees. Config parsing and a live vision request do not establish training quality; validate a real run on your own dataset.
+| LoRA type | What the workflow focuses on |
+| --- | --- |
+| **Person / character** | Likeness, with optional review of person counts, framing and dataset coverage. |
+| **Object / product** | The target object's appearance, with guided object selection, reversible crops and optional loss masks. |
+| **Style** | Visual treatment, while captions describe the subjects and scenes. Optional family hints cover photography, cartoons, drawing, painting and pixel art. |
+| **Action / concept** | Visible actions, participant roles, relationships and context, guided by the selected concept family. |
 
-## Development and checks
+Keep/change rules guide captioning. Varied source images still matter: captions and masks cannot guarantee that a model separates your target from its surroundings.
 
-- `python -m unittest discover -v` — persistence, caption concurrency, immutable export, trainer failure handling, recovery and HTTP checks.
-- `node --test tests/domain.test.mjs` — browser state rules and text escaping.
-- `python tests/live_vision.py` — **opt-in live** Prompt Studio test with a synthetic image, written under `test-results/`.
-- `<toolkit-python> tests/check_toolkit.py <toolkit-folder>` — parse all four configurations with installed AI Toolkit classes, without loading a model or training.
-- `node tests/browser.mjs` — browser workflow using an installed Playwright. Set `PLAYWRIGHT_MODULE` to its `index.mjs` or install it locally, `BROWSER_EXECUTABLE` to Edge/Chrome, and `TOOLKIT_PATH` / `TOOLKIT_PYTHON` to the installed backend. Generate the fixture with `tests/live_vision.py` first. Set `LIVE_VISION=1` for the optional end-to-end vision call; otherwise the browser test uses a manual caption. Test data is isolated from the normal workspace.
+### Choose how much to review
 
-Core adapter modules live under `studio/`; the UI lives under `web/`. AI Toolkit owns the training implementation and can be updated independently. Adapter schemas still need compatibility checks after major upstream changes.
+**Automatic · prepare and train** handles preparation and launch in one job. **Review first** lets you resolve caption warnings and visual findings before training. **Prepare dataset only** creates the prepared dataset and frozen export without starting the trainer.
 
-## License and attribution
+Presets, learning rules, custom preview prompts, image checks and training settings are available when you need them. The ordinary path stays Base info → Dataset → Create.
 
-GPL-3.0-only. The visual token palette and interaction conventions follow [ComfyUI Prompt Studio](https://github.com/tiko13/ComfyUI_PromptStudio). AI Toolkit and Prompt Studio remain separate installations with their own licenses.
+## Prepare images with purpose
+
+- **See the whole source and the actual training crop.** Full-image previews, aspect-ratio buckets and reversible positioning make preparation visible. Originals remain intact.
+- **Find the intended object.** Automatic localization proposes a crop; ambiguous or missing targets need a hint, manual selection, explicit full-image choice or exclusion. Optional rectangle, polygon and source-alpha masks refine training loss.
+- **Use your preferred captioning model.** Choose the connected local LLM, JoyCaption Beta One or a custom local image-capable endpoint. Dedicated captioners provide observations; the connected text LLM applies your learning rules.
+- **Review the evidence.** Inspect saved observations beside the final caption, edit drafts, and use optional focused visual questions to investigate uncertain details.
+- **Reuse work safely.** Reprocess saved observations when learning rules change and the image crop is still current. Manual captions are preserved; changed intent or crops flag earlier work for review.
+
+Read more about [caption sources and review](docs/user-guide.md#caption-source), [image preparation](docs/user-guide.md#image-preparation-for-every-category) and [category-specific guidance](docs/category-guidance.md).
+
+## Watch, train and compare
+
+### Follow a run as it happens
+
+The **Dashboard** brings together progress, loss, resource monitoring, logs, checkpoints and preview images. Adjust checkpoint and preview intervals before training, or use **Save checkpoint now** and **Generate previews** with a compatible installed backend.
+
+**Pause & save** preserves a resumable checkpoint and releases the trainer's GPU memory. Resume uses the frozen run. **Continue training** extends a completed run when its final weights and optimizer state are available. **Cancel run** retains files already saved.
+
+When a project's latest training run finishes successfully, its sidebar entry shows a green **Training complete** badge. The badge is restored from saved run history after reloading; continuing training shows the current training status until it finishes again.
+
+Each run freezes its images, captions and configuration. Once training begins, preparation stays locked; **Copy to new run** gives you an independent, editable project for the next experiment. Save a run's settings as a named preset to reuse a starting point.
+
+Each session in the sidebar has a **Delete** button. Choose **Delete session only** to remove its records from Studio and keep associated files on disk, or **Delete session and files** to also permanently remove Studio-owned image copies, analysis, exports, checkpoints, previews and comparisons. Original source images, shared models and saved presets are preserved. Active work and unresolved interrupted training/comparisons block deletion; changes in another window require reviewing the confirmation again. If disk cleanup fails, Studio reports retained files in its private `data/session-trash/` folder.
+
+### Choose the checkpoint you like
+
+**Results** puts final weights and retained checkpoints beside their matching previews, with full-size viewing, downloads and local folder access.
+
+With [Prompt Studio and the optional comparison bridge](integrations/promptstudio/README.md), compare selected checkpoints using the same prompt and seeds. Add a baseline without the trained LoRA, adjust strength, and inspect a resizable grid. Comparison settings and generated images are saved for later review.
+
+Comparisons require a compatible Prompt Studio **Create** workflow and ComfyUI on the same computer. Dataset preparation and training work independently of that connection.
+
+### Export a LoRA with useful details
+
+Add a public description, author, license, trigger phrases and recommended strength under **LoRA file metadata**. Studio embeds these alongside selected training settings in the Safetensors header. Private captions, preview prompts and local paths are excluded from that metadata.
+
+See the [metadata reader contract](docs/user-guide.md#reader-contract-for-other-applications-and-agents) for integrations, and the [user guide](docs/user-guide.md#training-results) for checkpoint management and comparison details.
+
+## Setup and models
+
+The model catalog currently includes **Krea 2 Raw**, **Qwen Image 2.1**, **FLUX.1 Dev** and **SDXL**. Studio checks whether the installed AI Toolkit supports the selected architecture. Hardware, VRAM, model access and dependencies depend on that backend and model; a catalog entry is not a tested hardware or quality guarantee.
+
+The setup wizard can connect an existing AI Toolkit installation or download a separate managed copy. Managed installation requires **Git** and at least **10 GB of free space**, with additional space needed for models, datasets and outputs. Existing Toolkit installations are not updated by the wizard.
+
+For the LLM connection, choose explicitly between:
+
+- **Prompt Studio backend:** reuse its saved provider and shared scheduling. Studio checks active work before requesting GPU model release.
+- **Standalone backend:** connect Llama.cpp, Ollama or KoboldCpp without ComfyUI. Named profiles retain provider settings; Studio can manage its own Llama.cpp process.
+
+Automatic image captioning needs a suitable vision model, or a dedicated captioner paired with a text LLM. The connection indicator helps diagnose availability; a reachable server alone does not establish image support.
+
+Read the [setup guide](docs/user-guide.md#start) and [LLM connection details](docs/user-guide.md#llm-connection) for installation, lifecycle and shared-GPU behavior.
+
+## Local storage and recovery
+
+Projects, images, captions, histories, settings and training outputs live under ignored **`data/`**. Requests use the captioning and training backends you configure. Studio binds to loopback and is intended for local use.
+
+Writes use revision checks, browser drafts survive reloads, and earlier caption versions remain recoverable. Back up the complete `data/` directory with the application stopped. See [persistence and recovery](docs/user-guide.md#persistence-and-reproducibility) before moving data or restarting during training.
+
+## Development
+
+The Python domain, persistence and training adapters live in `studio/`; the browser UI lives in `web/`. AI Toolkit provides the training engine.
+
+```powershell
+.venv\Scripts\python -m unittest discover -v
+node --test tests/domain.test.mjs
+git diff --check
+```
+
+The reproducible tests use synthetic inputs. Real integrations, private datasets and generated evidence belong in ignored `internal-tests/`. See [AGENTS.md](AGENTS.md) and the [development guide](docs/user-guide.md#development-and-checks).
+
+## License and acknowledgements
+
+LoRA Studio is licensed under **[GNU GPL v3.0 only](LICENSE)** (`GPL-3.0-only`), the same license as [Prompt Studio](https://github.com/tiko13/ComfyUI_PromptStudio).
+
+Its visual language and interaction patterns follow Prompt Studio. The vendored provider code is attributed in the [Prompt Studio vendor notice](studio/vendor/promptstudio/NOTICE.md). [AI Toolkit](https://github.com/ostris/ai-toolkit) supplies the training backend. Third-party components and model weights retain their respective licenses.

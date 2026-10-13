@@ -17,10 +17,10 @@ from studio.integrations import PromptStudio, local_url
 from studio.service import Service
 from studio.store import Store, Conflict
 from studio.trainer import config_for, export_run, preflight
-from tests.live_vision import fixture
+from tests.fixtures import fixture
 
-TEST_ROOT = Path(__file__).resolve().parents[1] / 'test-results'
-TEST_ROOT.mkdir(exist_ok=True)
+TEST_ROOT = Path(__file__).resolve().parents[1] / 'internal-tests' / 'artifacts' / 'unit'
+TEST_ROOT.mkdir(parents=True, exist_ok=True)
 
 class StudioCase(unittest.TestCase):
     def setUp(self):
@@ -28,6 +28,10 @@ class StudioCase(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.service = Service(self.root/'data')
+        from studio.sample_prompts import effective
+        prompt_generator=patch('studio.sample_prompts.generate',side_effect=lambda p,i,s:effective(p,i))
+        prompt_generator.start();self.addCleanup(prompt_generator.stop)
+        self.addCleanup(lambda: self.service._monitor.close() if self.service._monitor else None)
         self.project = self.service.store.save_project({'name':'Test LoRA','kind':'object','description':'The red shape','trigger':'redshape'})
         self.toolkit=self.root/'toolkit'
         self.toolkit.mkdir()
@@ -37,7 +41,10 @@ class StudioCase(unittest.TestCase):
         (arch/'krea2.py').write_text('arch = "krea2"')
         self.settings=self.service.save_settings({'integration':'standalone','llm_model':'vision','toolkit_path':str(self.toolkit),'toolkit_python':sys.executable})
     def image(self):
-        return self.service.import_image(self.project['id'],{'name':'fixture.png','data':base64.b64encode(fixture()).decode()})['image']
+        image = self.service.import_image(self.project['id'],{'name':'fixture.png','data':base64.b64encode(fixture()).decode()})['image']
+        image['object_target'] = {'mode': 'full'}
+        self.service.store.put_item('images', image)
+        return image
     def ready_image(self):
         image=self.image()
         return self.service.update_image(image['id'],{'revision':1,'caption':'redshape next to a blue circle','reviewed':True})
@@ -59,6 +66,27 @@ class StudioCase(unittest.TestCase):
         for value in [True,float('nan'),float('inf'),0,20001,100.5]:
             with self.subTest(value=value),self.assertRaises(ValueError):normalize_project({'training':{'steps':value}})
         with self.assertRaises(ValueError):normalize_project({'training':{'resolution':777}})
+    def test_optimizer_choice_persists_and_reaches_trainer(self):
+        value = {**self.project, 'training': {**self.project['training'], 'optimizer': 'automagic3'}}
+        saved = self.service.store.save_project(value, self.project['id'])
+        restored = Store(self.root/'data').project(saved['id'])
+        cfg = config_for(restored, 'dataset', 'output', 'optimizer-test')['config']['process'][0]
+        self.assertEqual(cfg['train']['optimizer'], 'automagic3')
+        self.assertEqual(cfg['train']['optimizer_params']['weight_decay'], 0.0001)
+        self.assertEqual(cfg['train']['timestep_type'], 'sigmoid')
+        self.assertEqual(cfg['train']['gradient_accumulation'], 1)
+        self.assertEqual(normalize_project({})['training']['optimizer'], 'adamw8bit')
+        with self.assertRaises(ValueError):normalize_project({'training':{'optimizer':'unknown'}})
+    def test_krea_weight_source_uses_raw_and_preserves_other_models(self):
+        for model in ('krea2', 'qwen21'):
+            p = normalize_project({'model': model, 'training': {'krea_weights': 'comfy_bf16'}})
+            cfg = config_for(p, 'dataset', 'output', 'source-test')['config']['process'][0]['model']
+            if model == 'krea2':
+                self.assertEqual(cfg['name_or_path'], 'Comfy-Org/Krea-2')
+                self.assertEqual(cfg['model_kwargs']['checkpoint_filename'], 'diffusion_models/krea2_raw_bf16.safetensors')
+            else:
+                self.assertEqual(cfg['name_or_path'], 'Qwen/Qwen-Image-2.1')
+        with self.assertRaises(ValueError):normalize_project({'training':{'krea_weights':'turbo'}})
     def test_intent_digest_tracks_rules_not_name(self):
         p={**self.project,'name':'New display name'}
         self.assertEqual(intent_digest(p),intent_digest(self.project))
@@ -135,6 +163,8 @@ class StudioCase(unittest.TestCase):
             cfg=config_for(p,'dataset','output','test')['config']['process'][0]
             self.assertEqual(cfg['model']['arch'],arch)
             self.assertEqual(cfg['train']['noise_scheduler'],'flowmatch')
+            # The toolkit's omitted negative defaults to False, which text encoders cannot concatenate.
+            self.assertEqual(cfg['sample']['neg'], '')
     def test_fake_trainer_failure_is_reported(self):
         self.ready_image()
         (self.toolkit/'run.py').write_text('import sys\nprint("deliberate test failure")\nsys.exit(3)\n')
@@ -204,5 +234,22 @@ class HTTPCase(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.urlopen(self.url+'/%2e%2e/server.py')
         self.assertEqual(error.exception.code,400)
         error.exception.close()
+    def test_monitor_routes_and_control_origin(self):
+        project=self.server.service.store.save_project({'name':'Synthetic run'})
+        job={'id':'synthetic-run','project':project['id'],'kind':'train','status':'failed','created':time.time()}
+        self.server.service.store.put_item('jobs',job)
+        with urllib.request.urlopen(self.url+'/api/activity') as response:
+            activity=json.load(response)
+        self.assertEqual(activity['jobs'][0]['id'],'synthetic-run')
+        self.assertEqual(set(activity['jobs'][0]),{'id','project','kind','status','created'})
+        with urllib.request.urlopen(self.url+'/api/jobs/synthetic-run/monitor') as response:
+            value=json.load(response)
+        self.assertEqual(value['status'],'failed')
+        self.assertFalse(value['capabilities']['resume'])
+        for origin,code in [('https://malicious.invalid',403),(self.url,400)]:
+            req=urllib.request.Request(self.url+'/api/jobs/synthetic-run/resume',data=b'{}',headers={'Content-Type':'application/json','Origin':origin})
+            with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.urlopen(req)
+            self.assertEqual(error.exception.code,code)
+            error.exception.close()
 
 if __name__=='__main__':unittest.main()

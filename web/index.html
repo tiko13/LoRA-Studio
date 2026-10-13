@@ -1,18 +1,36 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LoRA Studio</title><link rel="stylesheet" href="/styles.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LoRA Studio</title><link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48"><link rel="icon" href="/lora-studio-icon.svg" type="image/svg+xml" sizes="any"><link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/setup.css"></head>
 <body>
+  <header class="studio-header">
+    <a class="brand" href="/"><img class="brand-icon" src="/lora-studio-icon.svg" width="38" height="38" alt=""><span>LoRA Studio<small>One Stop LoRA Shop by tiko13</small></span></a>
+    <div class="header-actions">
+      <details id="system-status" class="status-control" data-state="checking">
+        <summary title="System status: checking connections" aria-label="System status: checking connections"><span class="status-dot" aria-hidden="true"></span></summary>
+        <div class="status-popover">
+          <strong>System status</strong>
+          <p id="status-summary" role="status">Checking local connections…</p>
+          <section class="status-section"><strong>Vision connection</strong><span id="vision-status">Checking…</span></section>
+          <section class="status-section"><strong>AI Toolkit</strong><span id="toolkit-status">Checking…</span></section>
+          <small id="status-checked">Connections have not been checked yet.</small>
+          <div class="status-actions"><button id="refresh-connections" type="button">Refresh status</button><button data-action="settings" type="button">Settings</button></div>
+        </div>
+      </details>
+      <button id="connections" class="settings-button" type="button" title="Settings" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m9 3-.6 2.4-2.1 1.2-2.4-.7-3 5.2 1.8 1.7v2.4L.9 17l3 5.2 2.4-.7 2.1 1.2L9 25h6l.6-2.3 2.1-1.2 2.4.7 3-5.2-1.8-1.8v-2.4l1.8-1.7-3-5.2-2.4.7-2.1-1.2L15 3Z" transform="translate(2 0) scale(.83)"/><circle cx="12" cy="12" r="3"/></svg><span>Settings</span></button>
+    </div>
+  </header>
   <aside class="sidebar">
-    <a class="brand" href="/"><span class="brand-icon">L</span><span>LoRA Studio<small>CREATE SOMETHING YOURS</small></span></a>
     <button id="new-project" class="primary wide">＋ New LoRA</button>
+    <div id="training-activity" aria-label="Training activity" aria-live="polite"></div>
     <div class="section-label">YOUR PROJECTS</div><nav id="projects" aria-label="Projects"></nav>
-    <div class="sidebar-bottom"><button id="connections" class="wide">⚙ Connections</button><p>Local workspace <span class="dot"></span><br><small>Your images and projects stay on this PC.</small></p></div>
+    <div class="sidebar-bottom"><p>Local workspace<br><small>Your images and projects stay on this PC.</small></p></div>
   </aside>
   <div class="workspace">
-    <header><div><span class="eyebrow">WORKSPACE</span><h1 id="project-title">Your next LoRA starts here</h1></div><span id="save-state" role="status">Ready</span></header>
-    <nav class="tabs" aria-label="Project steps"><button data-tab="setup" class="active">01 <span>Setup</span></button><button data-tab="dataset">02 <span>Dataset</span></button><button data-tab="training">03 <span>Training</span></button><button data-tab="runs">04 <span>Runs</span></button></nav>
+    <div class="workspace-heading"><div><span class="eyebrow">WORKSPACE</span><h1 id="project-title">Your next LoRA starts here</h1></div><span id="save-state" role="status">Ready</span></div>
+    <nav class="tabs" aria-label="Project steps"><button data-tab="setup" class="active">01 <span>Base info</span></button><button data-tab="dataset">02 <span>Dataset</span></button><button data-tab="training">03 <span>Create</span></button><button data-tab="results">04 <span>Results</span></button><button data-tab="dashboard"><span>Dashboard</span></button></nav>
+    <div id="preparation-status" hidden></div>
     <div class="workspace-body"><main id="content"></main><aside id="inspector"></aside></div>
-    <footer><span id="connection-label">Checking local connections…</span><span>LoRA Studio · v0.1</span></footer>
+    <footer><span>Define · Prepare · Train</span><span>LoRA Studio · v0.1</span></footer>
   </div>
   <dialog id="modal"><div id="modal-content"></div></dialog>
   <div id="toast" role="status" hidden></div>

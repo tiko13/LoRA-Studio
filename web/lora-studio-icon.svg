@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">LoRA Studio</title>
+  <defs>
+    <linearGradient id="background" x1="28" y1="20" x2="226" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#151722"/>
+      <stop offset="1" stop-color="#090a0f"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="49" y1="35" x2="202" y2="235" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#795cff"/>
+      <stop offset="0.52" stop-color="#9a7fff"/>
+      <stop offset="1" stop-color="#c1afff"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="248" height="248" rx="52" fill="url(#background)"/>
+  <rect x="4.5" y="4.5" width="247" height="247" rx="51.5" fill="none" stroke="#fff" stroke-opacity=".1"/>
+  <g fill="none" stroke="url(#mark)" stroke-linecap="round" stroke-linejoin="round" stroke-width="26">
+    <path d="M58 49v158h74"/>
+    <path d="M194 58h-39c-24 0-38 14-38 34s14 34 38 34h12c24 0 38 16 38 39s-16 42-43 42h-30"/>
+  </g>
+</svg>

@@ -1,8 +1,98 @@
+# Private application state and all real/local integration experiments.
+AGENTS.md
 data/
+internal-tests/
+# Legacy artifact locations remain ignored to prevent accidental reintroduction.
+test-results/
+
+# User content and derived artifacts, at any depth.
+datasets/
+dataset/
+captions/
+prompts/
+observations/
+histories/
+chats/
+projects/
+uploads/
+imports/
+exports/
+outputs/
+output/
+runs/
+checkpoints/
+samples/
+screenshots/
+traces/
+browser-profiles/
+backups/
+cache/
+.cache/
+tmp/
+temp/
+private/
+secrets/
+credentials/
+
+# Local settings, databases and recovery files.
+.env
+.env.*
+*.local.*
+*.local
+*.sqlite*
+*.db
+*.db-*
+*.log
+*.log.*
+*.pid
+*.bak
+*.dump
+*.pem
+*.key
+
+# Private browser downloads and exported training configuration, at any depth.
+lora-project-draft.json
+training-telemetry.json
+config.json
+
+# Dataset media, caption sidecars, exported archives and model weights.
+# New legitimate source assets need deliberate privacy review and a narrow exception.
+*.[pP][nN][gG]
+*.[jJ][pP][gG]
+*.[jJ][pP][eE][gG]
+*.[wW][eE][bB][pP]
+*.[gG][iI][fF]
+*.[bB][mM][pP]
+*.[tT][iI][fF]
+*.[tT][iI][fF][fF]
+*.[aA][vV][iI][fF]
+*.[hH][eE][iI][cC]
+# Deliberately authored application branding (never dataset media).
+!/web/lora-studio-icon.png
+!/web/apple-touch-icon.png
+*.[mM][pP]4
+*.[wW][eE][bB][mM]
+*.[mM][oO][vV]
+*.[wW][aA][vV]
+*.[mM][pP]3
+*.[fF][lL][aA][cC]
+*.[tT][xX][tT]
+!/requirements.txt
+*.[jJ][sS][oO][nN][lL]
+*.[cC][sS][vV]
+*.[pP][aA][rR][qQ][uU][eE][tT]
+*.[zZ][iI][pP]
+*.7[zZ]
+*.[tT][aA][rR]
+*.[gG][zZ]
+*.[sS][aA][fF][eE][tT][eE][nN][sS][oO][rR][sS]
+*.[cC][kK][pP][tT]
+*.[pP][tT]
+*.[pP][tT][hH]
+*.[gG][gG][uU][fF]
+
+# Dependencies and compiled artifacts.
 .venv/
 __pycache__/
 *.pyc
 node_modules/
-test-results/
-.env
-*.log
