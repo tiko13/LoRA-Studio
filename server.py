@@ -4,6 +4,9 @@ import json
 import mimetypes
 from pathlib import Path
 import re
+import subprocess
+import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 import urllib.request
@@ -11,16 +14,17 @@ import webbrowser
 
 from studio.domain import catalog, intent, intent_digest
 from studio.service import Service
-from studio.store import Conflict, PreparationLocked
+from studio.store import Conflict, PreparationLocked, EmptyProjectExists
 from studio.trainer import preflight
 from studio import llm
 from studio import results
 from studio import checkpoint_actions
 from studio.comparisons import Comparisons
+from studio.lifecycle import Lifecycle
 
 ROOT = Path(__file__).resolve().parent
 
-def make_server(port=8787, data=None, owner_url=None):
+def make_server(port=8787, data=None, owner_url=None, *, restart_enabled=False):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -49,6 +53,19 @@ def make_server(port=8787, data=None, owner_url=None):
                 while block := file.read(128 * 1024):
                     self.wfile.write(block)
         def dispatch(self):
+            writing = self.command != 'GET'
+            entered = False
+            try:
+                if writing:
+                    self.server.lifecycle.enter_write()
+                    entered = True
+                self.dispatch_request()
+            except Conflict as exc:
+                self.respond({'error': str(exc), 'code': 'conflict'}, 409)
+            finally:
+                if entered:
+                    self.server.lifecycle.leave_write()
+        def dispatch_request(self):
             try:
                 host = self.headers.get("Host", "")
                 if host not in {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}:
@@ -76,6 +93,15 @@ def make_server(port=8787, data=None, owner_url=None):
                         raise ValueError("Invalid path")
                     return self.file(path)
                 route = parts[1:]
+                if route == ['runtime'] and self.command == 'GET':
+                    return self.respond(self.server.lifecycle.status())
+                if route == ['restart'] and self.command == 'POST':
+                    result = self.server.lifecycle.request_restart()
+                    try:
+                        self.respond(result, 202)
+                    finally:
+                        threading.Thread(target=self.server.shutdown, daemon=True).start()
+                    return
                 if route == ['comparison-bridge'] and self.command == 'POST':
                     return self.respond(service.comparisons.capability(value.get('token')))
                 if len(route) >= 2 and route[0] == 'comparisons':
@@ -125,8 +151,12 @@ def make_server(port=8787, data=None, owner_url=None):
                     return self.respond(service.save_settings(value))
                 if route == ["connection"]:
                     return self.respond(service.connection())
+                if route == ['connection', 'status'] and self.command == 'GET':
+                    from studio.connection_monitor import snapshot
+                    return self.respond(snapshot(service.settings()))
                 if route == ["projects"] and self.command == "POST":
-                    return self.respond(service.store.save_project(value), 201)
+                    return self.respond(service.store.save_project(value, guard_empty=True,
+                        selected_project_id=value.get('selected_project_id')), 201)
                 if len(route) >= 2 and route[0] == "projects":
                     pid = route[1]
                     project = service.store.project(pid)
@@ -222,6 +252,8 @@ def make_server(port=8787, data=None, owner_url=None):
                             raise ValueError("Invalid file")
                         return self.file(path, download=path.suffix in {".zip", ".safetensors", ".pt"})
                 raise KeyError("Route not found")
+            except EmptyProjectExists as exc:
+                self.respond({'error': str(exc), 'code': 'empty_project_exists', 'project': exc.project}, 409)
             except Conflict as exc:
                 self.respond({"error": str(exc), "code": 'preparation_locked' if isinstance(exc, PreparationLocked) else 'conflict'}, 409)
             except KeyError as exc:
@@ -250,11 +282,11 @@ def make_server(port=8787, data=None, owner_url=None):
     service = Service(data or ROOT / "data", owner_url=owner_url)
     service.comparisons = Comparisons(service, f'http://127.0.0.1:{server.server_port}')
     server.service = service
+    server.lifecycle = Lifecycle(service, restart_enabled)
     settings = service.settings()
     training_active = any(j['kind'] == 'train' and j['status'] in {'queued', 'running', 'stopping', 'interrupted'}
                           for j in service.store.items('jobs'))
     if not owner_url and not training_active and settings['integration'] == 'standalone' and settings['llm_provider'] == 'llamacpp' and settings['llamacpp_autostart']:
-        import threading
         def autostart():
             try:
                 service.llm_process('start')
@@ -269,6 +301,7 @@ if __name__ == "__main__":
     parser.add_argument("--data", type=Path)
     parser.add_argument("--open", action="store_true")
     parser.add_argument('--owner-url', help='Attach to an existing Studio server without interrupting its active jobs')
+    parser.add_argument('--serve', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     # Reopening the launcher should reveal the existing app instead of starting a second server.
     if args.open and args.port and args.data is None:
@@ -280,7 +313,19 @@ if __name__ == "__main__":
                 raise SystemExit(0)
         except (OSError, ValueError):
             pass
-    server = make_server(args.port, args.data, args.owner_url)
+    if not args.serve:
+        # Keep the launcher and its console alive while each worker loads fresh code.
+        command = [sys.executable, str(ROOT / 'server.py'), *sys.argv[1:], '--serve']
+        try:
+            while True:
+                code = subprocess.call(command)
+                if code != 75:
+                    raise SystemExit(code)
+                command = [arg for arg in command if arg != '--open']
+                print('Restarting LoRA Studio…', flush=True)
+        except KeyboardInterrupt:
+            raise SystemExit(0)
+    server = make_server(args.port, args.data, args.owner_url, restart_enabled=True)
     print(f"LoRA Studio: http://127.0.0.1:{server.server_port}", flush=True)
     if args.open:
         webbrowser.open(f"http://127.0.0.1:{server.server_port}")
@@ -290,3 +335,5 @@ if __name__ == "__main__":
         pass
     finally:
         server.server_close()
+    if server.lifecycle.restarting:
+        raise SystemExit(75)

@@ -13,6 +13,11 @@ class Conflict(ValueError):
 class PreparationLocked(Conflict):
     pass
 
+class EmptyProjectExists(Conflict):
+    def __init__(self, project):
+        super().__init__('An empty LoRA project already exists.')
+        self.project = project
+
 class Store:
     def __init__(self, root):
         self.root = Path(root).resolve()
@@ -42,7 +47,7 @@ class Store:
         if not row:
             raise KeyError("Project not found")
         return upgrade_project(json.loads(row[0]))
-    def save_project(self, value, pid=None):
+    def save_project(self, value, pid=None, *, guard_empty=False, selected_project_id=None):
         if not isinstance(value, dict):
             raise ValueError('Project must be an object')
         if pid is None and 'training' not in value:
@@ -55,6 +60,14 @@ class Store:
         item = normalize_project(value)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if pid is None and guard_empty:
+                # Serialize the check and insert across tabs and concurrent requests.
+                row = db.execute('''SELECT p.data FROM projects p
+                    WHERE NOT EXISTS (SELECT 1 FROM images i WHERE i.project=p.id)
+                    ORDER BY (p.id=?) DESC, p.updated DESC, p.id LIMIT 1''',
+                    (selected_project_id or '',)).fetchone()
+                if row:
+                    raise EmptyProjectExists(upgrade_project(json.loads(row[0])))
             if pid:
                 row = db.execute("SELECT revision,data FROM projects WHERE id=?", (pid,)).fetchone()
                 if not row:

@@ -52,8 +52,9 @@ def request(url, payload=None, timeout=15, raw=None, content_type=None, accept_t
 class PromptStudio:
     def __init__(self, url):
         self.url = local_url(url)
-    def connection(self):
-        summary = request(self.url + PS + "/chats?summaries=1&limit=1", timeout=8)
+    def connection(self, summary=None):
+        if summary is None:
+            summary = request(self.url + PS + "/chats?summaries=1&limit=1", timeout=8)
         active = summary.get("activeChatId")
         if not active:
             raise ValueError("Open a Prompt Studio chat and select a vision LLM first")

@@ -40,6 +40,11 @@ window.loraStudioImagePreview = openImagePreview;
 document.addEventListener('click', event => {
   const trigger = event.target.closest('[data-image-preview]');
   if (!trigger || trigger.disabled) return;
+  const canvas = trigger.querySelector('canvas');
+  if (event.detail && canvas?.dataset.previewGesture === 'drawing') {
+    delete canvas.dataset.previewGesture;
+    return;
+  }
   const image = trigger.querySelector('img');
   const src = trigger.dataset.imagePreview || image?.currentSrc || image?.src;
   if (!src) return;

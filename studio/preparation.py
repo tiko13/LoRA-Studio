@@ -7,7 +7,7 @@ import hashlib
 import io
 import json
 import math
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageDraw, ImageOps, UnidentifiedImageError
 from .person_detector import assess_boxes
 from .categories import CATEGORIES
 from . import object_preparation as objects
@@ -135,6 +135,44 @@ def normalize_options(value=None, inherit=False):
         if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw) or not 0 <= raw <= 1:
             raise ValueError("Crop position must be between 0 and 1")
         result[key] = raw
+    rect = value.get('crop_rect')
+    if rect is not None:
+        if not inherit:
+            raise ValueError('Select crops for individual images, not the project default')
+        if (not isinstance(rect, list) or len(rect) != 4 or
+                any(isinstance(v, bool) or not isinstance(v, (int, float)) or
+                    not math.isfinite(v) or not 0 <= v <= 1 for v in rect) or
+                rect[2] <= rect[0] or rect[3] <= rect[1]):
+            raise ValueError('Crop rectangle must have ordered left, top, right and bottom coordinates between 0 and 1')
+        result['crop_rect'] = list(rect)
+    aspect = value.get('crop_aspect', 0)
+    if isinstance(aspect, bool) or not isinstance(aspect, (int, float)) or not math.isfinite(aspect) or not 0 <= aspect <= 10000:
+        raise ValueError('Crop aspect ratio must be a finite non-negative number')
+    if aspect:
+        if not inherit:
+            raise ValueError('Crop aspect ratios apply to individual images')
+        result['crop_aspect'] = aspect
+    strokes = value.get('hide_mask', [])
+    if not isinstance(strokes, list) or len(strokes) > 300:
+        raise ValueError('Mask supports up to 300 strokes; clear or simplify the mask')
+    if strokes and not inherit:
+        raise ValueError('Masks apply to individual images')
+    if strokes:
+        cleaned = []
+        for stroke in strokes:
+            if not isinstance(stroke, dict) or stroke.get('tool') not in {'brush', 'rectangle'} or not isinstance(stroke.get('hide'), bool):
+                raise ValueError('Invalid hide mask tool')
+            size, points = stroke.get('size'), stroke.get('points')
+            if isinstance(size, bool) or not isinstance(size, (int, float)) or not math.isfinite(size) or not .001 <= size <= .5:
+                raise ValueError('Mask brush size must be between 0.1% and 50%')
+            if (not isinstance(points, list) or not 1 <= len(points) <= 1000 or
+                    any(not isinstance(p, list) or len(p) != 2 or
+                        any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not 0 <= v <= 1 for v in p) for p in points)):
+                raise ValueError('Invalid mask points')
+            if stroke['tool'] == 'rectangle' and len(points) != 2:
+                raise ValueError('A mask rectangle needs two corners')
+            cleaned.append({'tool': stroke['tool'], 'hide': stroke['hide'], 'size': size, 'points': points})
+        result['hide_mask'] = cleaned
     return result
 
 
@@ -161,17 +199,24 @@ def bucket(width, height, resolution, multiple):
 def plan(project, item):
     width, height = item["width"], item["height"]
     source_width, source_height = width, height
+    options = normalize_options(item.get("preparation"), inherit=True)
     region = objects.region(project, item) if project['kind'] == 'object' else None
+    custom_crop = options.get('crop_rect')
+    if custom_crop:
+        # Coordinates refer to the oriented original, including for Object masks.
+        l, t, r, b = custom_crop
+        left, top = min(width - 1, round(l * width)), min(height - 1, round(t * height))
+        region = [left, top, min(width, max(left + 1, round(r * width))),
+                  min(height, max(top + 1, round(b * height)))]
     if region:
         width, height = region[2] - region[0], region[3] - region[1]
     profile = PROFILES[project["model"]]
     resolution = project["training"]["resolution"]
-    options = normalize_options(item.get("preparation"), inherit=True)
     mode = options["mode"]
     if mode == "auto":
         mode = normalize_options(project.get("preparation"))["mode"]
     bw, bh = bucket(width, height, resolution, profile["multiple"])
-    if region and mode == 'crop' and options['mode'] == 'auto':
+    if region and project['kind'] == 'object' and not custom_crop and mode == 'crop' and options['mode'] == 'auto':
         # Grid alignment must not shave a protruding part off a tight target box.
         trial_scale = max(bw / width, bh / height)
         trial_w, trial_h = math.ceil(width * trial_scale), math.ceil(height * trial_scale)
@@ -194,14 +239,40 @@ def plan(project, item):
               "multiple": profile["multiple"], "rgba": project["model"] == "qwen21"}
     if region:
         result['source_region'] = region
+    if project['kind'] == 'object' and region:
         result['object_box'] = objects.selection(project, item)['box']
         result['object_target_signature'] = objects.signature(project, item)
+    if custom_crop:
+        result['custom_crop'] = True
+    if options.get('hide_mask'):
+        result['hide_mask'] = options['hide_mask']
     result["digest"] = hashlib.sha256(json.dumps({"source": item["digest"], **result}, sort_keys=True).encode()).hexdigest()
     return result
 
 
 def render(source, geometry):
     image = open_image(source).convert("RGBA")
+    if geometry.get('hide_mask'):
+        # A reversible content mask, distinct from Object training loss masks.
+        mask = Image.new('L', image.size, 0)
+        draw = ImageDraw.Draw(mask)
+        for stroke in geometry['hide_mask']:
+            points = [(round(x * (image.width - 1)), round(y * (image.height - 1))) for x, y in stroke['points']]
+            fill = 255 if stroke['hide'] else 0
+            if stroke['tool'] == 'rectangle':
+                a, b = points
+                draw.rectangle((min(a[0], b[0]), min(a[1], b[1]), max(a[0], b[0]), max(a[1], b[1])), fill=fill)
+            else:
+                width = max(1, round(stroke['size'] * min(image.size)))
+                if len(points) > 1:
+                    draw.line(points, fill=fill, width=width, joint='curve')
+                radius = (width - 1) / 2
+                for x, y in points:
+                    if width == 1:
+                        draw.point((x, y), fill=fill)
+                    else:
+                        draw.ellipse((x-radius, y-radius, x+radius, y+radius), fill=fill)
+        image.paste((128, 128, 128, 255), (0, 0, image.width, image.height), mask)
     if geometry.get('source_region'):
         image = image.crop(tuple(geometry['source_region']))
     image = image.resize((geometry["resize_width"], geometry["resize_height"]), Image.Resampling.BICUBIC)
@@ -237,7 +308,15 @@ def advisory(item, geometry, kind='character'):
     if geometry.get('source_region'):
         r = geometry['source_region']
         if (r[2]-r[0])*(r[3]-r[1]) < 512**2 and item['width']*item['height'] >= 512**2:
-            flags.append('Small selected object: inspect detail in the training crop; a large original does not guarantee enough target pixels.')
+            flags.append('Small selected region: inspect detail in the training crop; a large original does not guarantee enough target pixels.')
+    if geometry.get('hide_mask'):
+        flags.append('Hidden areas are filled with neutral grey in captions and training images; this is not background reconstruction or a loss mask.')
+    if geometry.get('custom_crop') and geometry.get('object_box'):
+        l, t, r, b = geometry['source_region']
+        target = geometry['object_box']
+        if (l > target[0]*item['width'] or t > target[1]*item['height'] or
+                r < target[2]*item['width'] or b < target[3]*item['height']):
+            flags.append('The manual crop cuts into the selected object. Review the target and caption before training.')
     if max(item["width"], item["height"]) / min(item["width"], item["height"]) > 3:
         flags.append("Extreme aspect ratio: inspect the subject's size in the training image.")
     if item.get("has_alpha") and not geometry["rgba"]:

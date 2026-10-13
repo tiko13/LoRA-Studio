@@ -12,7 +12,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from studio.domain import normalize_project, parse_caption
-from studio.preparation import bucket, metadata, plan, render, PROFILES
+from studio.preparation import bucket, metadata, plan, render, normalize_options, PROFILES
 from studio.service import Service
 from studio.store import Conflict
 from studio.trainer import export_run, config_for, preflight
@@ -36,6 +36,65 @@ class PreparationCase(unittest.TestCase):
         self.service = Service(Path(temp.name) / "data")
         self.project = self.service.store.save_project({"description": "Synthetic colour panels", "trigger": "panels"})
         self.image = self.service.import_image(self.project["id"], {"name": "panels.png", "data": base64.b64encode(png()).decode()})["image"]
+
+    def test_manual_crop_and_mask_survive_reload_and_match_frozen_export(self):
+        options = {'mode': 'pad', 'crop_rect': [.5, 0, 1, 1], 'hide_mask': [
+            {'tool': 'rectangle', 'hide': True, 'size': .1, 'points': [[.6, .2], [.9, .4]]}]}
+        item = self.service.update_image(self.image['id'], {'revision': 1, 'caption': 'panels, synthetic red panel', 'reviewed': True})
+        before = self.service.dataset(self.project['id'])[0]['plan']['digest']
+        item = self.service.update_image(item['id'], {'revision': item['revision'], 'preparation': options})
+        view = self.service.dataset(self.project['id'])[0]
+        self.assertTrue(view['preparation_stale'])
+        self.assertNotEqual(before, view['plan']['digest'])
+        self.assertEqual(view['plan']['source_region'], [300, 0, 600, 900])
+        self.assertEqual(Service(self.service.store.root).store.item('images', item['id'])['preparation']['crop_rect'], options['crop_rect'])
+        preview = self.service.preview(item['id'])
+        with patch('studio.trainer.subprocess.check_output', return_value='synthetic'):
+            root = export_run(self.service.store, self.project, [item], 'export', {'toolkit_path': 'synthetic-toolkit'})
+        exported = (root / 'dataset' / (item['id'] + '.png')).read_bytes()
+        self.assertEqual(exported, base64.b64decode(preview['png']))
+        self.assertEqual(self.service.image_path(item).read_bytes(), png())
+        self.assertEqual((root / 'originals' / (item['id'] + '.png')).read_bytes(), png())
+        self.service.update_image(item['id'], {'revision': item['revision'], 'preparation': {'mode': 'crop'}})
+        self.assertEqual(exported, (root / 'dataset' / (item['id'] + '.png')).read_bytes())
+        with self.assertRaises(Conflict):
+            self.service.update_image(item['id'], {'revision': item['revision'], 'preparation': options})
+
+    def test_round_brush_diameter_restore_and_mask_coordinates(self):
+        source = Image.new('RGB', (400, 400), 'red')
+        raw = io.BytesIO(); source.save(raw, format='PNG')
+        item = {'width': 400, 'height': 400, 'digest': 'synthetic', 'preparation': {'hide_mask': [
+            {'tool': 'brush', 'hide': True, 'size': .2, 'points': [[.5, .5]]}]}}
+        geometry = plan(self.project, item)
+        image = render(io.BytesIO(raw.getvalue()), geometry)
+        self.assertEqual(image.getpixel((200, 200)), (128, 128, 128))
+        self.assertEqual(image.getpixel((165, 165)), (255, 0, 0))  # Circle, not a square brush.
+        diameter = sum(image.getpixel((x, 200)) == (128, 128, 128) for x in range(400))
+        self.assertLessEqual(abs(diameter - 80), 1)
+        item['preparation']['hide_mask'].append({'tool': 'brush', 'hide': False, 'size': .05, 'points': [[.5, .5]]})
+        restored = render(io.BytesIO(raw.getvalue()), plan(self.project, item))
+        self.assertEqual(restored.getpixel((200, 200)), (255, 0, 0))
+        self.assertEqual(restored.getpixel((225, 200)), (128, 128, 128))
+        item['preparation']['hide_mask'] = [{'tool': 'brush', 'hide': True, 'size': 1/400, 'points': [[.5, .5]]}]
+        single = render(io.BytesIO(raw.getvalue()), plan(self.project, item))
+        self.assertEqual(single.getpixel((200, 200)), (128, 128, 128))
+        self.assertEqual(single.getpixel((201, 200)), (255, 0, 0))
+        item['preparation']['crop_rect'] = [.5, 0, 1, 1]
+        geometry = plan(self.project, item)
+        self.assertEqual(geometry['source_region'], [200, 0, 400, 400])
+        self.assertNotEqual(geometry['digest'], plan(self.project, {**item, 'preparation': {}})['digest'])
+
+    def test_crop_mask_validation_and_legacy_compatibility(self):
+        self.assertEqual(normalize_options({'mode': 'crop'}, True), {'mode': 'crop', 'x': .5, 'y': .5})
+        for rect in [[0, 0, 0, 1], [0, 1, 1, 0], [-.1, 0, 1, 1], [0, 0, float('nan'), 1], [False, 0, 1, 1], 'bad']:
+            with self.subTest(rect=rect), self.assertRaises(ValueError):
+                normalize_options({'crop_rect': rect}, True)
+        stroke = {'tool': 'brush', 'hide': True, 'size': .1, 'points': [[.5, .5]]}
+        for invalid in [{'size': 0}, {'size': float('inf')}, {'hide': 1}, {'tool': 'unknown'}, {'points': [[2, 0]]}, {'points': []}, {'tool': 'rectangle'}]:
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                normalize_options({'hide_mask': [{**stroke, **invalid}]}, True)
+        with self.assertRaises(ValueError):
+            normalize_options({'hide_mask': [stroke] * 301}, True)
 
     def test_model_grids_and_preserved_resolution(self):
         self.assertEqual(self.project["training"]["resolution"], 1024)

@@ -10,10 +10,14 @@
         <div class="status-popover">
           <strong>System status</strong>
           <p id="status-summary" role="status">Checking local connections…</p>
-          <section class="status-section"><strong>Vision connection</strong><span id="vision-status">Checking…</span></section>
-          <section class="status-section"><strong>AI Toolkit</strong><span id="toolkit-status">Checking…</span></section>
+          <section id="promptstudio-section" class="status-section" data-state="checking"><div class="status-entry-head"><strong>Prompt Studio</strong><span class="status-entry-label">Checking…</span></div><span id="promptstudio-status" class="status-entry-detail"></span></section>
+          <section id="llm-section" class="status-section" data-state="checking"><div class="status-entry-head"><strong>Backend LLM</strong><span class="status-entry-label">Checking…</span></div><span id="llm-status" class="status-entry-detail"></span></section>
+          <section id="vision-section" class="status-section" data-state="checking"><div class="status-entry-head"><strong>Vision support</strong><span class="status-entry-label">Checking…</span></div><span id="vision-status" class="status-entry-detail"></span></section>
+          <section id="toolkit-section" class="status-section" data-state="checking"><div class="status-entry-head"><strong>AI Toolkit</strong><span class="status-entry-label">Checking…</span></div><span id="toolkit-status" class="status-entry-detail"></span></section>
           <small id="status-checked">Connections have not been checked yet.</small>
           <div class="status-actions"><button id="refresh-connections" type="button">Refresh status</button><button data-action="settings" type="button">Settings</button></div>
+          <div class="status-actions"><button id="restart-studio" type="button">Restart LoRA Studio</button></div>
+          <p id="restart-status" role="status" hidden></p>
         </div>
       </details>
       <button id="connections" class="settings-button" type="button" title="Settings" aria-haspopup="dialog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m9 3-.6 2.4-2.1 1.2-2.4-.7-3 5.2 1.8 1.7v2.4L.9 17l3 5.2 2.4-.7 2.1 1.2L9 25h6l.6-2.3 2.1-1.2 2.4.7 3-5.2-1.8-1.8v-2.4l1.8-1.7-3-5.2-2.4.7-2.1-1.2L15 3Z" transform="translate(2 0) scale(.83)"/><circle cx="12" cy="12" r="3"/></svg><span>Settings</span></button>

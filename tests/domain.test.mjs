@@ -9,6 +9,47 @@ import {styleSettings,styleSummary} from '../web/style-preparation.js';
 import {conceptSettings,conceptSummary} from '../web/concept-preparation.js';
 import {llmSettings,captureLlm} from '../web/llm-settings.js';
 import {comparisonGrid,comparisonList} from '../web/comparisons.js';
+import {newProjectAction} from '../web/project-lifecycle.js';
+
+test('New LoRA preserves the selected empty project and reports a red error',async()=>{
+  const project={id:'empty',name:'Saved draft'};
+  const state={projects:[project],current:{project},tab:'dataset'};
+  let saved=false;
+  const notices=[];
+  const create=newProjectAction({state,save:async()=>{saved=true;},api:async(path,method,body)=>{
+    assert.ok(saved);assert.equal(body.selected_project_id,'empty');
+    throw Object.assign(new Error(),{code:'empty_project_exists',project});
+  },selectProject:async()=>assert.fail('Already selected'),toast:(...args)=>notices.push(args)});
+  await create();
+  assert.equal(state.tab,'dataset');assert.deepEqual(state.projects,[project]);
+  assert.deepEqual(notices,[['An empty LoRA project already exists.',true]]);
+});
+
+test('New LoRA switches to another empty project with a green notice and no duplicate entry',async()=>{
+  const project={id:'empty'};
+  const state={projects:[{id:'filled'},project],current:{project:{id:'filled'}},tab:'dataset'};
+  const notices=[];
+  let selected;
+  const create=newProjectAction({state,save:async()=>{},api:async()=>{
+    throw Object.assign(new Error(),{code:'empty_project_exists',project});
+  },selectProject:async id=>{selected=id;},toast:(...args)=>notices.push(args)});
+  await create();
+  assert.equal(selected,'empty');assert.equal(state.tab,'setup');assert.equal(state.projects.length,2);
+  assert.deepEqual(notices,[['An empty LoRA project already exists, switching to it.',false,'success']]);
+});
+
+test('New LoRA coalesces rapid clicks and can retry after a failed save',async()=>{
+  const state={projects:[],current:null};let resolveSave, calls=0;
+  const create=newProjectAction({state,save:()=>new Promise(resolve=>{resolveSave=resolve;}),
+    api:async()=>{calls++;return {id:'new'};},selectProject:async()=>{},toast:()=>{}});
+  const first=create();await create();resolveSave();await first;
+  assert.equal(calls,1);assert.equal(state.projects.length,1);
+  let fails=true;
+  const retry=newProjectAction({state,save:async()=>{if(fails)throw Error('Save failed');},
+    api:async()=>({id:'retry'}),selectProject:async()=>{},toast:()=>{}});
+  await assert.rejects(retry,/Save failed/);fails=false;await retry();
+  assert.equal(state.projects[0].id,'retry');
+});
 
 test('comparison grid keeps seed rows and checkpoint columns and escapes saved content',()=>{
   const data={id:'a'.repeat(32),job:'synthetic',created:0,workflow_name:'<workflow>',status:'failed',error:'<error>',

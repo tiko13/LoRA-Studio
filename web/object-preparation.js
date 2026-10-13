@@ -42,12 +42,12 @@ export function bindObjectEditor(form,image) {
     if(tool==='polygon'||tool==='clear'){form.elements.object_polygon.value='[]';form.elements.object_mask.value='none';changed();}
     form.querySelector('#object-tool-status').textContent=tool==='polygon'?'Click around the visible object. Three or more points form the loss mask.':tool==='box'?'Drag a rectangle around every visible part of the target.':'Mask cleared.';
   }));
-  canvas.addEventListener('pointerdown',event=>{if(form.elements.object_mode.disabled)return;if(tool==='box'){start=point(event);canvas.setPointerCapture(event.pointerId);}});
+  canvas.addEventListener('pointerdown',event=>{delete canvas.dataset.previewGesture;if(form.elements.object_mode.disabled)return;if(tool==='box'){start=point(event);canvas.setPointerCapture(event.pointerId);}});
   canvas.addEventListener('pointerup',event=>{
     if(form.elements.object_mode.disabled){start=null;return;}
     const end=point(event);
-    if(tool==='box'&&start){const b=[Math.min(start[0],end[0]),Math.min(start[1],end[1]),Math.max(start[0],end[0]),Math.max(start[1],end[1])];start=null;if(b[2]-b[0]<.01||b[3]-b[1]<.01)return;form.elements.object_box.value=JSON.stringify(b);form.elements.object_mode.value='manual';syncCoordinates(form);changed();}
-    else if(tool==='polygon'){const p=JSON.parse(form.elements.object_polygon.value);if(p.length>=200)return;p.push(end);form.elements.object_polygon.value=JSON.stringify(p);if(p.length>=3)form.elements.object_mask.value='polygon';changed();}
+    if(tool==='box'&&start){const b=[Math.min(start[0],end[0]),Math.min(start[1],end[1]),Math.max(start[0],end[0]),Math.max(start[1],end[1])];start=null;if(b[2]-b[0]<.01||b[3]-b[1]<.01)return;canvas.dataset.previewGesture='drawing';form.elements.object_box.value=JSON.stringify(b);form.elements.object_mode.value='manual';syncCoordinates(form);changed();}
+    else if(tool==='polygon'){canvas.dataset.previewGesture='drawing';const p=JSON.parse(form.elements.object_polygon.value);if(p.length>=200)return;p.push(end);form.elements.object_polygon.value=JSON.stringify(p);if(p.length>=3)form.elements.object_mask.value='polygon';changed();}
   });
   form.querySelectorAll('[data-object-coordinate]').forEach(input=>input.addEventListener('change',()=>{const b=JSON.parse(form.elements.object_box.value);b[Number(input.dataset.objectCoordinate)]=Number(input.value)/100;form.elements.object_box.value=JSON.stringify(b);form.elements.object_mode.value='manual';changed();}));
 }

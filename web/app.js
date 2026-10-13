@@ -1,7 +1,10 @@
+import {connectionStatus,startConnectionMonitor} from './connection-status.js';
+import {openCropEditor} from './crop-editor.js';
+import {bindRestart} from './restart.js';
 import './image-preview.js';
 import {resultsView,completedRun} from './results.js';
 import {checkpointComparison} from './comparisons.js';
-import {preparationLocked,lockNotice,disablePreparation,enablePreparation} from './project-lifecycle.js';
+import {preparationLocked,lockNotice,disablePreparation,enablePreparation,newProjectAction} from './project-lifecycle.js';
 import {setupWizard} from './setup.js';
 import {conceptSettings} from './concept-preparation.js';
 import {styleSettings} from './style-preparation.js';
@@ -22,14 +25,17 @@ const navigation=new URLSearchParams(location.search);
 let resultsJob=null, resultsData=null, resultsError='', resultsRequest=0;
 let deletingProject=null;
 const state = {projects:[], catalog:null, settings:null, current:null, tab:'setup', dirty:false, saving:null, timer:null, connection:null, recovered:false};
+const createNewProject = newProjectAction({state,save,api,selectProject,toast});
 const comparisons=checkpointComparison({api,modal,toast,refreshResults:async()=>{resultsData=null;await loadResults(resultsJob);render();}});
 const openSetup = setupWizard({api, state, toast, onSaved:()=>{checkConnections().catch(()=>{});refresh().then(render).catch(()=>{});}});
 const icons = {character:'◎',object:'◇',style:'✧',concept:'↔'};
 const draftKey = id => `lora-studio.draft.${id}`;
 let toastTimer;
-let connectionCheck, connectionError='', connectionChecked=0;
-function toast(message, error=false) { const el=$('#toast'); el.textContent=message; el.className=error?'error':''; el.hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.hidden=true,error?12000:4500); }
-async function api(path, method='GET', value) { const response=await fetch('/api'+path,{method,headers:value?{'Content-Type':'application/json'}:{},body:value?JSON.stringify(value):undefined}); const data=await response.json(); if(!response.ok){const error=new Error(data.error||'Request failed');error.status=response.status;error.code=data.code;throw error;} return data; }
+let connectionCheck, connectionError='';
+const connectionMonitor=startConnectionMonitor({api,getSettings:()=>state.settings,onChange:renderConnectionStatus});
+bindRestart({save, toast, onConnected:()=>{checkConnections().catch(()=>{});}});
+function toast(message, error=false, tone='') { const el=$('#toast'); el.textContent=message; el.className=error?'error':tone; el.hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.hidden=true,error?12000:4500); }
+async function api(path, method='GET', value) { const response=await fetch('/api'+path,{method,headers:value?{'Content-Type':'application/json'}:{},body:value?JSON.stringify(value):undefined}); const data=await response.json(); if(!response.ok){const error=new Error(data.error||'Request failed');error.status=response.status;error.code=data.code;error.project=data.project;throw error;} return data; }
 function saveLabel(text) { $('#save-state').textContent=text; }
 function localDraft() { try { localStorage.setItem(draftKey(state.current.project.id),JSON.stringify(state.current.project)); } catch { toast('Browser draft storage is unavailable. Keep this tab open until saved.',true); } }
 function changed() { state.dirty=true; localDraft(); saveLabel('Saving…'); clearTimeout(state.timer); state.timer=setTimeout(()=>save().catch(e=>toast(e.message,true)),550); renderInspector(); }
@@ -195,49 +201,36 @@ async function connections() {
   $('#settings-form [name=caption_source]').addEventListener('change',()=>updateCaptionSettings($('#settings-form')));
 }
 function connectionText() {
-  if(connectionError) return connectionError;
-  if(connectionCheck) return 'Checking local connections…';
-  if(!state.connection) return 'Connections have not been checked yet.';
-  const c=state.connection, ps=c.promptstudio;
-  if(state.settings.caption_source&&state.settings.caption_source!=='connected') return captionSourceLabel(state.settings.caption_source)+' · '+(c.captioner?.configured?'configured':'needs setup')+' · Text LLM '+(ps.available||c.standalone.available?'connected':'unavailable')+' · AI Toolkit '+(c.backend.available?'ready':'not configured');
-  return (ps.available?`Prompt Studio · ${ps.provider} · ${ps.vision?.available?'vision ready':'vision unavailable: '+(ps.vision?.reason||'select a vision model')}`:c.standalone.available?'Standalone endpoint available'+(c.standalone.configured??state.settings.llm_model?'':' · choose a model ID'):'Vision connection unavailable')+' · AI Toolkit '+(c.backend.available?'ready':'not configured');
+  const snapshot=connectionMonitor.snapshot;
+  const view=connectionStatus(snapshot,snapshot,state.settings||{},connectionMonitor.error||connectionError);
+  return Object.values(view.rows).filter(row=>!row.hidden).map(row=>row.label+' · '+row.status).join(' / ');
 }
 function renderConnectionStatus() {
-  const c=state.connection, control=$('#system-status');
-  let tone='checking', summary='Checking local connections…', vision='Checking…', toolkit='Checking…';
-  if(connectionError) {
-    tone='offline'; summary='Connection check failed'; vision=connectionError; toolkit='Status unavailable. Refresh to try again.';
-  } else if(c&&!connectionCheck) {
-    const ps=c.promptstudio, standalone=c.standalone;
-    const dedicated=state.settings.caption_source&&state.settings.caption_source!=='connected';
-    const visionAvailable=dedicated?c.captioner?.configured&&(ps.available||standalone.available&&(standalone.configured??Boolean(state.settings.llm_model))):ps.available?ps.vision?.available:standalone.available&&(standalone.configured??Boolean(state.settings.llm_model))&&standalone.vision?.available===true;
-    tone=visionAvailable&&c.backend.available?'idle':!ps.available&&!standalone.available&&!c.backend.available?'offline':'attention';
-    summary=tone==='idle'?'Connections available':tone==='offline'?'Connections unavailable':'Connections need attention';
-    vision=dedicated?`${captionSourceLabel(state.settings.caption_source)} · ${c.captioner?.reason||'Configure captioning in Settings.'} Text LLM: ${ps.available?'Prompt Studio':standalone.available?'standalone endpoint':'unavailable'}.`:ps.available
-      ? `Prompt Studio · ${ps.provider} · ${ps.model||'Loaded model'} — ${ps.vision?.available?'Vision ready':ps.vision?.reason||'Select a vision model in Prompt Studio.'}`
-      : standalone.available
-        ? `Standalone endpoint connected. ${standalone.vision?.available?'Vision capability reported.':standalone.configured?'Model configured. Use setup to test vision.':'Choose a vision model in Backend settings.'}`
-        : (state.settings.integration==='promptstudio'?ps.reason:standalone.reason)||'Open Settings to configure a vision connection.';
-    toolkit=c.backend.available?'Installation available. Model support is checked before training.':c.backend.reason||'Open Settings to configure AI Toolkit and its Python executable.';
-  }
-  control.dataset.state=tone;
-  const label='System status: '+summary.toLowerCase();
+  const control=$('#system-status');
+  const view=connectionStatus(connectionMonitor.snapshot,connectionMonitor.snapshot,state.settings||{},connectionMonitor.error||connectionError);
+  control.dataset.state=view.tone;
+  const label='System status: '+view.summary.toLowerCase();
   control.querySelector('summary').title=label;
   control.querySelector('summary').setAttribute('aria-label',label);
-  $('#status-summary').textContent=summary;
-  $('#vision-status').textContent=vision;
-  $('#toolkit-status').textContent=toolkit;
-  $('#status-checked').textContent=connectionCheck?'Checking connections…':connectionError?'Refresh to try again.':connectionChecked?'Last checked '+new Date(connectionChecked).toLocaleTimeString(): 'Connections have not been checked yet.';
+  $('#status-summary').textContent=view.summary;
+  for(const [key,row] of Object.entries(view.rows)) {
+    const section=$('#'+key+'-section');
+    section.hidden=Boolean(row.hidden);
+    section.dataset.state=row.state;
+    section.querySelector('strong').textContent=row.label;
+    section.querySelector('.status-entry-label').textContent=row.status;
+    section.querySelector('.status-entry-detail').textContent=row.detail;
+  }
+  $('#status-checked').textContent=connectionMonitor.error?'Live status unavailable. Retrying automatically.':connectionMonitor.checked?'Live status checked '+new Date(connectionMonitor.checked).toLocaleTimeString():'Checking live status…';
   $('#refresh-connections').disabled=Boolean(connectionCheck);
   if($('#connection-result')) $('#connection-result').textContent=connectionText();
 }
 async function checkConnections() {
   if(connectionCheck) return connectionCheck;
   connectionError='';
-  connectionCheck=api('/connection');
+  connectionCheck=connectionMonitor.refresh();
   renderConnectionStatus();
-  try {state.connection=await connectionCheck;connectionChecked=Date.now();}
-  catch(e) {connectionError=e.message;throw e;}
+  try {await connectionCheck;}
   finally {connectionCheck=null;renderConnectionStatus();}
 }
 function editImage(id) {
@@ -245,6 +238,21 @@ function editImage(id) {
   modal('Review image & caption',`<div id="image-draft-banner"></div><form id="image-form" data-id="${i.id}" data-revision="${i.revision}"><div class="modal-grid"><div>${reviewPreparation(i,state.current.project)}${coverageControls(i,state.catalog,state.current.project)}<p class="muted">${h(i.name)}</p><span class="badge ${status.tone}">${status.label}</span><label class="checkbox"><input name="included" type="checkbox" ${i.included?'checked':''}>Include in training</label></div><div><label class="field">Training caption<textarea name="caption" maxlength="6000">${h(i.caption)}</textarea><small>Manual edits are preserved during automatic captioning.</small></label><label class="checkbox"><input name="reviewed" type="checkbox">Keep this caption · I reviewed it against the training image and learning rules</label>${reviewPanel(i,state.current.project,state.catalog)}${captionEvidence(i)}${i.warnings.length?`<div class="note warning">${i.warnings.map(w=>`<p>${h(w)}</p>`).join('')}</div>`:''}<details><summary>Original visual observations · ${h(captionSourceLabel(i.caption_source))}</summary><p>${h(i.observations||'No vision analysis yet.')}</p></details><details><summary>Caption history · ${i.history.length}</summary>${[...i.history].reverse().map(v=>`<p><small>${new Date(v.at*1000).toLocaleString()} · ${h(v.source)}</small><br>${h(v.caption||'(Empty)')}</p>`).join('')}</details></div></div><div class="actions end extra-rules"><button type="submit" name="next" value="1">Save & next</button><button type="submit" class="primary">Save image review</button></div></form>`);
   if(localStorage.getItem(imageDraftKey(id))) $('#image-draft-banner').innerHTML='<div class="note warning">An unsaved image review is available. Restoring uses the latest revision shown here; review it before saving.<div class="actions"><button data-action="restore-image-draft">Restore draft</button><button data-action="discard-image-draft">Discard draft</button></div></div>';
   if(!preparationLocked(state.current.project))bindObjectEditor($('#image-form'),i);
+  const form=$('#image-form');
+  form.querySelectorAll('[data-crop-editor]').forEach(trigger=>trigger.addEventListener('click',event=>{
+    if(event.detail&&trigger.querySelector('#crop-overlay')?.dataset.previewGesture==='drawing'){
+      delete form.querySelector('#crop-overlay').dataset.previewGesture;return;
+    }
+    if(preparationLocked(state.current.project))return;
+    openCropEditor({src:'/api/images/'+id,preparation:imageFormValue(form).preparation,plan:form.preparationPlan||i.plan,trigger,
+      valid:()=>form.isConnected&&!preparationLocked(state.current.project),
+      preview:async(options,signal)=>{
+        const response=await fetch('/api/images/'+id+'/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({preparation:options,object_target:readObjectForm(form)}),signal});
+        const result=await response.json();if(!response.ok)throw new Error(result.error||'Preview failed');return result;
+      },
+      apply:options=>{form.elements.prep_mode.value=options.mode;form.elements.prep_aspect.value=options.crop_aspect||0;form.elements.prep_rect.value=JSON.stringify(options.crop_rect||null);form.elements.prep_mask.value=JSON.stringify(options.hide_mask||[]);form.elements.prep_rect.dispatchEvent(new Event('input',{bubbles:true}));}
+    });
+  }));
   renderPreparationLock();
   updatePreparationPreview();
 }
@@ -252,7 +260,7 @@ let previewSequence=0, previewTimer=null;
 function imageDraftKey(id) {return 'lora-studio.image-draft.'+id;}
 function imageFormValue(form) {
   return {...(readObjectForm(form)?{object_target:readObjectForm(form)}:{}),revision:Number(form.dataset.revision),caption:form.elements.caption.value,included:form.elements.included.checked,reviewed:form.elements.reviewed.checked,
-    preparation:{mode:form.elements.prep_mode.value,x:Number(form.elements.prep_x.value),y:Number(form.elements.prep_y.value)},
+    preparation:{mode:form.elements.prep_mode.value,x:Number(form.elements.prep_x.value),y:Number(form.elements.prep_y.value),crop_aspect:Number(form.elements.prep_aspect.value),crop_rect:JSON.parse(form.elements.prep_rect.value),hide_mask:JSON.parse(form.elements.prep_mask.value)},
     coverage_kind:state.current.project.kind, coverage_override:Object.fromEntries(Object.keys(state.catalog.types.find(t=>t.id===state.current.project.kind).coverage).map(k=>[k,form.elements['coverage_'+k]?.value||'']).filter(([,v])=>v)),
     ...(form.elements.accept_verification?{accept_verification:form.elements.accept_verification.checked}:{}),
     ...(form.elements.person_count?{person_count:form.elements.person_count.value===''?null:Number(form.elements.person_count.value)}:{}),accept_advisories:form.elements.accept_advisories.checked};
@@ -263,10 +271,10 @@ async function updatePreparationPreview() {
   try {
     const result=await api('/images/'+form.dataset.id+'/preview','POST',{preparation:imageFormValue(form).preparation,object_target:readObjectForm(form)});
     if(sequence!==previewSequence||form!==$('#image-form'))return;
-    const p=result.plan;
+    const p=result.plan;form.preparationPlan=p;
     if($('#object-mask-figure')){$('#object-mask-figure').hidden=!result.mask_png;if(result.mask_png)$('#object-mask-preview').src='data:image/png;base64,'+result.mask_png;}
     $('#prepared-preview').src='data:image/png;base64,'+result.png;
-    $('#preparation-result').textContent=`${p.source_width} × ${p.source_height} → ${p.width} × ${p.height} · ${p.source_region?'target crop + ':''}${p.mode==='crop'?p.removed_percent+'% fit adjustment':'padding around selected region'}`;
+    $('#preparation-result').textContent=`${p.source_width} × ${p.source_height} → ${p.width} × ${p.height} · ${p.source_region?'selected region + ':''}${p.mode==='crop'?p.removed_percent+'% fit adjustment':'padding around selected region'}`;
     const original=new Image();original.onload=()=>{if(sequence===previewSequence&&$('#crop-overlay')){drawCrop($('#crop-overlay'),original,p,form.elements.show_boxes?.checked?state.current.images.find(i=>i.id===form.dataset.id)?.detection:null);drawObjectMask($('#crop-overlay'),original,form);}};original.src='/api/images/'+form.dataset.id;
     form.elements.prep_x.disabled=form.elements.prep_y.disabled=preparationLocked(state.current.project)||p.mode!=='crop';
   }catch(e){if(form===$('#image-form'))$('#preparation-result').textContent=e.message;}
@@ -313,11 +321,11 @@ async function action(name) {
   if(name==='recommended-resolution') {const p=state.current.project;p.training.resolution=state.catalog.models.find(m=>m.id===p.model).preparation.default;changed();await save();await refresh();render();return;}
   if(name==='restore-image-draft'||name==='discard-image-draft') {
     const f=$('#image-form'),key=imageDraftKey(f.dataset.id);
-    if(name==='restore-image-draft') {const d=JSON.parse(localStorage.getItem(key));restoreObjectForm(f,d.object_target);f.elements.caption.value=d.caption;f.elements.included.checked=d.included;f.elements.reviewed.checked=false;f.elements.prep_mode.value=d.preparation.mode;f.elements.prep_x.value=d.preparation.x;f.elements.prep_y.value=d.preparation.y;if(f.elements.person_count)f.elements.person_count.value=d.person_count??'';f.elements.accept_advisories.checked=false;for(const [k,v] of Object.entries((d.coverage_kind||'character')===state.current.project.kind?d.coverage_override||{}:{})){if(f.elements['coverage_'+k])f.elements['coverage_'+k].value=v;}updatePreparationPreview();}
+    if(name==='restore-image-draft') {const d=JSON.parse(localStorage.getItem(key));restoreObjectForm(f,d.object_target);f.elements.caption.value=d.caption;f.elements.included.checked=d.included;f.elements.reviewed.checked=false;f.elements.prep_mode.value=d.preparation.mode;f.elements.prep_x.value=d.preparation.x;f.elements.prep_y.value=d.preparation.y;f.elements.prep_aspect.value=d.preparation.crop_aspect||0;f.elements.prep_rect.value=JSON.stringify(d.preparation.crop_rect||null);f.elements.prep_mask.value=JSON.stringify(d.preparation.hide_mask||[]);if(f.elements.person_count)f.elements.person_count.value=d.person_count??'';f.elements.accept_advisories.checked=false;for(const [k,v] of Object.entries((d.coverage_kind||'character')===state.current.project.kind?d.coverage_override||{}:{})){if(f.elements['coverage_'+k])f.elements['coverage_'+k].value=v;}updatePreparationPreview();}
     else localStorage.removeItem(key);
     $('#image-draft-banner').innerHTML='';return;
   }
-  if(name==='new') {await save();const p=await api('/projects','POST',{});state.projects.unshift(p);state.tab='setup';await selectProject(p.id);return;}
+  if(name==='new') {await createNewProject();return;}
   if(name==='close-modal') {$('#modal').close();return;}
   if(name==='pick-images'||name==='pick-folder') {$(name==='pick-images'?'#image-input':'#folder-input').click();return;}
   if(name==='restore') {const revision=state.current.project.revision;state.current.project={...state.recovered,revision};state.recovered=false;changed();render();return;}
@@ -384,7 +392,7 @@ document.addEventListener('click',async e=>{
 document.addEventListener('input',e=>{
   if(preparationLocked(state.current?.project)&&e.target.closest('#content,#image-form')){if(e.target.name==='show_boxes')updatePreparationPreview();return;}
   const form=e.target.closest('#image-form');
-  if(form) {if(['caption','prep_mode','prep_x','prep_y'].includes(e.target.name)&&form.elements.accept_verification)form.elements.accept_verification.checked=false;if(e.target.name==='show_boxes')updatePreparationPreview();if(e.target.name.startsWith('prep_')||e.target.name.startsWith('object_')){form.elements.reviewed.checked=false;form.elements.accept_advisories.checked=false;clearTimeout(previewTimer);previewTimer=setTimeout(updatePreparationPreview,180);}try{localStorage.setItem(imageDraftKey(form.dataset.id),JSON.stringify(imageFormValue(form)));}catch{toast('Image draft storage unavailable. Keep this review open until saved.',true);}return;}
+  if(form) {if(['caption','prep_mode','prep_x','prep_y','prep_rect','prep_mask'].includes(e.target.name)&&form.elements.accept_verification)form.elements.accept_verification.checked=false;if(e.target.name==='show_boxes')updatePreparationPreview();if(e.target.name.startsWith('prep_')||e.target.name.startsWith('object_')){form.elements.reviewed.checked=false;form.elements.accept_advisories.checked=false;clearTimeout(previewTimer);previewTimer=setTimeout(updatePreparationPreview,180);}try{localStorage.setItem(imageDraftKey(form.dataset.id),JSON.stringify(imageFormValue(form)));}catch{toast('Image draft storage unavailable. Keep this review open until saved.',true);}return;}
   if(e.target.dataset.preparation){state.current.project.preparation={...(state.current.project.preparation||{}),[e.target.dataset.preparation]:e.target.value};changed();return;}
   if(e.target.dataset.loraMetadata){setMetadataField(state.current.project,e.target.dataset.loraMetadata,e.target.value);changed();return;}
   const key=e.target.dataset.field;if(!key)return;
@@ -408,7 +416,7 @@ document.addEventListener('dragover',e=>{const zone=e.target.closest('#drop-zone
 document.addEventListener('dragleave',e=>{e.target.closest('#drop-zone')?.classList.remove('drag');});
 document.addEventListener('drop',async e=>{if(e.target.closest('#drop-zone')){e.preventDefault();try{await importImages([...e.dataTransfer.files]);}catch(err){toast(err.message,true);}}});
 window.addEventListener('beforeunload',e=>{if(state.dirty||state.saving){e.preventDefault();e.returnValue='';}});
-$('#system-status').addEventListener('toggle',()=>{if($('#system-status').open&&state.settings&&Date.now()-connectionChecked>30000)checkConnections().catch(()=>{});});
+$('#system-status').addEventListener('toggle',()=>{if($('#system-status').open&&state.settings){checkConnections().catch(()=>{});}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#system-status').open){$('#system-status').open=false;$('#system-status summary').focus();}});
 async function boot(){const b=await api('/bootstrap');Object.assign(state,b);renderProjects();render();const active=navigation.get('project')||localStorage.getItem('lora-studio.active');state.tab=['setup','dataset','training','dashboard','runs','results'].includes(navigation.get('tab'))?navigation.get('tab'):'setup';dashboardJob=navigation.get('job');resultsJob=navigation.get('job');if(state.projects.length)await selectProject(state.projects.some(p=>p.id===active)?active:state.projects[0].id);refreshActivity();checkConnections().catch(()=>{});if(b.onboarding?.disposition==='new'||['queued','running','interrupted'].includes(b.onboarding?.install?.status))await openSetup();}
 boot().catch(e=>{connectionError=e.message;renderConnectionStatus();toast(e.message,true);saveLabel('Could not load workspace');});

@@ -27,6 +27,8 @@ The “almost” is setup and a suitable dataset. You still choose the images an
 
 Keep the launcher console open while using Studio; press **Ctrl+C** to stop the server. You can reopen setup from **Settings → Run setup**, or choose **Set up later** while you organise a project.
 
+The top-right status dot monitors your connections automatically. Open it to see separate indicators for Prompt Studio (when selected), the backend LLM, vision support or dedicated captioning, and AI Toolkit. Green means ready or connected, orange means working, and red means a problem needs attention; unknown states stay gray. LLM details include the model, processing phase and token count when reported by the backend. Ollama and generic OpenAI-compatible endpoints do not report live activity. Monitoring refreshes about every 5 seconds while open and 15 seconds while closed, pauses in hidden tabs, and never loads an unloaded Llama.cpp router model.
+
 <details>
 <summary>Terminal launch and manual installation</summary>
 
